@@ -128,6 +128,12 @@ class SynapseTuner:
                 else:
                     print(f"Warning: {key} cannot be assigned as it does not exist in the synapse. Check your mod file or spec_syn_param.")
 
+        # set a random object reference for these certain types of synapse models
+        print(self.syn)
+        if self.syn in ['pyr2pyr', 'int2pyr']:
+            r.uniform(0, 1)
+            self.h_syn.setRandObjRef(r)
+            self.random_generator = r
 
     def _set_up_recorders(self):
         """

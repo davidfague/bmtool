@@ -133,7 +133,7 @@ class SynapseTuner:
             r = h.Random()
             r.uniform(0, 1)
             self.syn.setRandObjRef(r)
-            # self.random_generator = r
+            self.random_generator = r
 
     def _set_up_recorders(self):
         """

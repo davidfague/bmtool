@@ -130,9 +130,10 @@ class SynapseTuner:
 
         # set a random object reference for these certain types of synapse models
         if self.conn['spec_settings']['level_of_detail'] in ['pyr2pyr', 'int2pyr']:
+            r = h.Random()
             r.uniform(0, 1)
-            self.h_syn.setRandObjRef(r)
-            self.random_generator = r
+            self.syn.setRandObjRef(r)
+            # self.random_generator = r
 
     def _set_up_recorders(self):
         """

@@ -129,7 +129,7 @@ class SynapseTuner:
                     print(f"Warning: {key} cannot be assigned as it does not exist in the synapse. Check your mod file or spec_syn_param.")
 
         # set a random object reference for these certain types of synapse models
-        if self.conn['spec_settings']['level_of_detail'] in ['pyr2pyr', 'int2pyr']:
+        if self.conn['spec_settings']['level_of_detail'] in ['pyr2pyr', 'int2pyr', 'pyr2pyrSUM']:
             r = h.Random()
             r.uniform(0, 1)
             self.syn.setRandObjRef(r)

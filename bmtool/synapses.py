@@ -19,7 +19,7 @@ from ipywidgets import HBox, VBox
 class SynapseTuner:
     def __init__(self, mechanisms_dir: str, templates_dir: str, conn_type_settings: dict, connection: str,
                  general_settings: dict, json_folder_path: str = None, current_name: str = 'i',
-                 other_vars_to_record: list = None, slider_vars: list = None) -> None:
+                 other_vars_to_record: list = None, slider_vars: list = None, template_arg: str = None) -> None:
         """
         Initialize the SynapseModule class with connection type settings, mechanisms, and template directories.
         
@@ -58,6 +58,7 @@ class SynapseTuner:
         self.current_name = current_name
         self.other_vars_to_record = other_vars_to_record
         self.ispk = None
+        self.template_arg = template_arg
 
         if slider_vars:
             # Start by filtering based on keys in slider_vars
@@ -122,7 +123,10 @@ class SynapseTuner:
         """
         Set up the neuron cell based on the specified connection settings.
         """
-        self.cell = getattr(h, self.conn['spec_settings']['post_cell'])()
+        if self.template_arg is not None:
+            self.cell = getattr(h, self.conn['spec_settings']['post_cell'])(self.template_arg)
+        else:
+            self.cell = getattr(h, self.conn['spec_settings']['post_cell'])()
 
 
     def _set_up_synapse(self):

@@ -245,7 +245,7 @@ class SynapseTuner:
         self.rise_time = syn_props['rise_time']
         self.decay_time = syn_props['decay_time']
 
-        return get_amp(current)
+        return current
 
 
     def _find_first(self, x):

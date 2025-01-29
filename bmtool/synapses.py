@@ -296,6 +296,7 @@ class SynapseTuner:
             tspk = tspk[0]
             
         ispk = int(np.floor(tspk / dt))
+        print(f"dt in _get_syn_prop: {dt}")
         baseline = isyn[ispk]
         isyn = isyn[ispk:] - baseline
         # print(np.abs(isyn))

@@ -286,6 +286,7 @@ class SynapseTuner:
             A dictionary containing the synaptic properties: baseline, sign, peak amplitude, latency, rise time, 
             decay time, and half-width.
         """
+        dt = h.dt # defaulting was not working properly
         if self.vclamp:
             isyn = self.ivcl
         else:
@@ -296,8 +297,8 @@ class SynapseTuner:
             tspk = tspk[0]
             
         ispk = int(np.floor(tspk / dt))
-        print(f"dt in _get_syn_prop: {dt}")
-        print(f"h.dt in _get_syn_prop: {h.dt}")
+        # print(f"dt in _get_syn_prop: {dt}")
+        # print(f"h.dt in _get_syn_prop: {h.dt}")
         baseline = isyn[ispk]
         isyn = isyn[ispk:] - baseline
         # print(np.abs(isyn))

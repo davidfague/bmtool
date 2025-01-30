@@ -290,7 +290,7 @@ class SynapseTuner:
         if self.vclamp:
             isyn = self.ivcl
         else:
-            isyn = self.rec_vectors['i']
+            isyn = self.rec_vectors[self.current_name]
         isyn = np.asarray(isyn)
         tspk = np.asarray(self.tspk)
         if tspk.size:

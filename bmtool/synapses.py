@@ -1167,11 +1167,11 @@ class SynapseOptimizer:
         for metric, value in result.target_metrics.items():
             achieved = result.achieved_metrics.get(metric)
             if achieved is not None and metric != 'amplitudes':  # Skip amplitude array
-                print(f"{metric}: {float(achieved):.3f} (target: {float(value):.3f})")
+                print(f"{metric}: {float(achieved):.6f} (target: {float(value):.6f})")
         
         print("\nOptimal Parameters:")
         for param, value in result.optimal_params.items():
-            print(f"{param}: {float(value):.3f}")
+            print(f"{param}: {float(value):.6f}")
         
         # Plot final model response
         if self.run_train_input:

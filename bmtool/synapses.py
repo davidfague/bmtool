@@ -1087,8 +1087,17 @@ class SynapseOptimizer:
             x0 = np.array([np.random.uniform(b[0], b[1]) for b in bounds])
         elif init_guess=='middle_guess':
             x0 = [(b[0] + b[1])/2 for b in bounds]
+        elif init_guess == 'original':
+            x0 = np.array([getattr(self.tuner.syn, name) for name in param_names]) # Start from the values the synapse currently has
+            # Check if these values fall within their respective bounds
+            for val, (low, high), name in zip(x0, bounds, param_names):
+                if not (low <= val <= high):
+                    raise ValueError(
+                        f"The initial value for parameter '{name}' is out of bounds!\n"
+                        f"Value: {val}, Bounds: ({low}, {high})"
+                    )
         else:
-            raise Exception("Pick a vaid init guess method either random or midde_guess")
+            raise Exception("Pick a vaid init guess method either 'random', 'midde_guess', or 'original'")
         normalized_x0 = self._normalize_params(np.array(x0), param_names)
         
         

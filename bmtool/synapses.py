@@ -59,6 +59,7 @@ class SynapseTuner:
         self.other_vars_to_record = other_vars_to_record
         self.ispk = None
         self.template_arg = template_arg
+        self.input_mode = False
 
         if slider_vars:
             # Start by filtering based on keys in slider_vars

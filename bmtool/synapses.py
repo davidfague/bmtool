@@ -55,6 +55,7 @@ class SynapseTuner:
         self.conn = self.conn_type_settings[connection]
         self.synaptic_props = self.conn['spec_syn_param']
         self.vclamp = general_settings['vclamp']
+        self.use_PSP = general_settings.get('use_PSP', False)
         self.current_name = current_name
         self.other_vars_to_record = other_vars_to_record
         self.ispk = None
@@ -223,7 +224,7 @@ class SynapseTuner:
         vcldur = [[0, 0, 0], [self.general_settings['tstart'], h.tstop, 1e9]]
         for i in range(3):
             self.vcl.amp[i] = self.conn['spec_settings']['vclamp_amp']
-            self.vcl.dur[i] = vcldur[1][i]
+            self.vcl.dur[i] = vcldur[1][i] if self.vclamp else 0.0
 
         # Run simulation
         h.tstop = self.general_settings['tstart'] + self.general_settings['tdur']
@@ -234,7 +235,11 @@ class SynapseTuner:
         
         current = np.array(self.rec_vectors[self.current_name])
         syn_props = self._get_syn_prop(rise_interval=self.general_settings['rise_interval']) 
-        current = (current - syn_props['baseline']) * 1000  # Convert to pA
+        if self.use_PSP:
+            baseline = current[int(np.floor(self.tspk[0] / h.dt))]
+            current = (current - baseline) * 1000  # Convert to pA
+        else:
+            current = (current - syn_props['baseline']) * 1000  # Convert to pA
         current_integral = np.trapz(current, dx=h.dt)  # pA·ms
         
         if plot_and_print:
@@ -288,7 +293,9 @@ class SynapseTuner:
             decay time, and half-width.
         """
         dt = h.dt # defaulting was not working properly
-        if self.vclamp:
+        if self.use_PSP:
+            isyn = self.soma_v
+        elif self.vclamp:
             isyn = self.ivcl
         else:
             isyn = self.rec_vectors[self.current_name]
@@ -300,20 +307,30 @@ class SynapseTuner:
         ispk = int(np.floor(tspk / dt))
         # print(f"dt in _get_syn_prop: {dt}")
         # print(f"h.dt in _get_syn_prop: {h.dt}")
-        baseline = isyn[ispk]
+        if self.use_PSP:
+            t = np.asarray(self.t)
+            baseline = isyn[(t >= tspk - 99.0) & (t < tspk - 1.0)].mean()
+        else:
+            baseline = isyn[ispk]
         isyn = isyn[ispk:] - baseline
         # print(np.abs(isyn))
         # print(np.argmax(np.abs(isyn)))
         # print(isyn[np.argmax(np.abs(isyn))])
         # print(np.sign(isyn[np.argmax(np.abs(isyn))]))  
-        sign = np.sign(isyn[np.argmax(np.abs(isyn))])  
+        if self.use_PSP:
+            peak_window = np.flatnonzero((t[ispk:] >= tspk + 3.0) & (t[ispk:] <= tspk + 18.0))
+            ipk = peak_window[np.argmax(isyn[peak_window])]
+            sign = np.sign(isyn[ipk])
+        else:
+            sign = np.sign(isyn[np.argmax(np.abs(isyn))])
         if short:
             return {'baseline': baseline, 'sign': sign}
         isyn *= sign
         # print(isyn)
         # peak amplitude
-        ipk, _ = find_peaks(isyn)
-        ipk = ipk[0]
+        if not self.use_PSP:
+            ipk, _ = find_peaks(isyn)
+            ipk = ipk[0]
         peak = isyn[ipk]
         # latency
         istart = self._find_first(np.diff(isyn[:ipk + 1]) > 0)
@@ -326,9 +343,12 @@ class SynapseTuner:
         iend = self._find_first(np.diff(isyn[ipk:]) > 0)
         iend = isyn.size - 1 if iend is None else iend + ipk
         decay_len = iend - ipk + 1
-        popt, _ = curve_fit(lambda t, a, tau: a * np.exp(-t / tau), dt * np.arange(decay_len),
-                            isyn[ipk:iend + 1], p0=(peak, dt * decay_len / 2))
-        decay_time = popt[1]
+        if decay_len < 2:
+            decay_time = dt
+        else:
+            popt, _ = curve_fit(lambda t, a, tau: a * np.exp(-t / tau), dt * np.arange(decay_len),
+                                isyn[ipk:iend + 1], p0=(peak, dt * decay_len / 2))
+            decay_time = popt[1]
         # half-width
         hw1 = self._find_first(isyn[istart:ipk + 1] > 0.5 * peak)
         hw2 = self._find_first(isyn[ipk:] < 0.5 * peak)
@@ -367,7 +387,11 @@ class SynapseTuner:
         # Plot synaptic current (always included)
         current = self.rec_vectors[self.current_name]
         syn_prop = self._get_syn_prop(short=True)
-        current = (current - syn_prop['baseline']) 
+        if self.use_PSP:
+            baseline = current[int(np.floor(self.tspk[0] / h.dt))]
+            current = (current - baseline)
+        else:
+            current = (current - syn_prop['baseline'])
         current = current * 1000
         
         axs[0].plot(self.t, current)
@@ -461,7 +485,24 @@ class SynapseTuner:
             A list containing the peak amplitudes for each segment of the recorded synaptic current.
         
         """
-        isyn = np.array(self.rec_vectors[self.current_name].to_python())
+        if self.use_PSP:
+            isyn = np.array(self.soma_v)
+            t = np.asarray(self.t)
+            amp = []
+            self.ispk = []
+            # Berger 2009 EPSP windows relative to each presynaptic spike.
+            for i, spike in enumerate(np.asarray(self.tspk)):
+                baseline_window = 99.0 if i == 0 else 2.0
+                baseline = isyn[(t >= spike - baseline_window) & (t < spike - 1.0)].mean()
+                peak_window = np.flatnonzero((t >= spike + 3.0) & (t <= spike + 18.0))
+                if not peak_window.size:
+                    break
+                ipk = peak_window[np.argmax(isyn[peak_window])]
+                self.ispk.append(ipk)
+                amp.append(isyn[ipk] - baseline)
+            return amp
+        else:
+            isyn = np.array(self.rec_vectors[self.current_name].to_python())
         tspk = np.append(np.asarray(self.tspk), h.tstop)
         syn_prop = self._get_syn_prop(short=True)
         # print("syn_prp[sign] = " + str(syn_prop['sign']))
@@ -503,7 +544,7 @@ class SynapseTuner:
         return max_amp * 1000 # scale unit
 
 
-    def _calc_ppr_induction_recovery(self,amp, normalize_by_trial=True,print_math=True):
+    def _calc_ppr_induction_recovery(self,amp, normalize_by_trial=True,print_math=True, *, allen_normalizer=None):
         """
         Calculates induction and recovery metrics from the synaptic response amplitudes.
 
@@ -513,20 +554,55 @@ class SynapseTuner:
             Array containing the amplitudes of synaptic responses.
         normalize_by_trial : bool, optional
             If True, normalize the amplitudes within each trial. Default is True.
+        allen_normalizer : float, optional
+            Opt in to Allen median-based metrics using one connection-wide signed
+            normalizer, in the same units as amp. Pass signed fitted current-clamp
+            amplitudes, with rows already selected for the requested protocol.
+            Use 12 pulse columns, padding missing/QC-failed responses with NaN.
+            Select 50 Hz trials across delays for induction, or 250 ms recovery
+            trials across frequencies for recovery; use the same normalizer in
+            these separate calls. Each metric applies its own pulse eligibility.
+            Compute the normalizer from the full eligible connection response pool;
+            this method does not extract fitted amplitudes or select protocols.
 
         Returns:
         --------
+        ppr : np.ndarray
+            The second-pulse amplitude divided by the first-pulse amplitude for each trial.
         induction : float
-            The calculated induction value (difference between pulses 6-8 and 1st pulse).
+            Mean A5/A1 by default; median normalized late-minus-first difference
+            when allen_normalizer is supplied.
         recovery : float
-            The calculated recovery value (difference between pulses 9-12 and pulses 1-4).
-        maxamp : float
-            The maximum amplitude in the response.
+            The difference between mean amplitudes of pulses 9-12 and pulses 1-4,
+            normalized by the maximum amplitude; in Allen mode, the median of
+            matched pulse differences divided by allen_normalizer.
         """
-        amp = np.array(amp)
+        amp = np.array(amp, dtype=float) if allen_normalizer is not None else np.array(amp)
         amp = (amp * 1000) # scale up
         amp = amp.reshape(-1, amp.shape[-1])
+        if allen_normalizer is not None:
+            try:
+                normalizer = float(allen_normalizer) * 1000
+            except (TypeError, ValueError) as exc:
+                raise ValueError("allen_normalizer must be a finite nonzero scalar") from exc
+            if not np.isfinite(normalizer) or normalizer == 0:
+                raise ValueError("allen_normalizer must be a finite nonzero scalar")
+            if amp.shape[1] < 12:
+                raise ValueError("Allen induction/recovery metrics require at least 12 pulse amplitudes per trial")
+            ppr = amp[:, 1:2] / amp[:, :1]
+            valid_induction = np.isfinite(amp[:, [0, 5, 6, 7]]).all(axis=1)
+            valid_recovery = np.isfinite(amp[:, :12]).all(axis=1)
+            ind_amp, rec_amp = amp[valid_induction], amp[valid_recovery]
+            induction = (np.median((np.median(ind_amp[:, 5:8], axis=1) - ind_amp[:, 0]) / normalizer)
+                         if valid_induction.any() else np.nan)
+            recovery = (np.median(np.median(rec_amp[:, 8:12] - rec_amp[:, :4], axis=1) / normalizer)
+                        if valid_recovery.any() else np.nan)
+            if print_math:
+                print(f"Allen induction: median((median(A6,A7,A8) - A1) / M) = {induction:.6g}")
+                print(f"Allen recovery: median(median(A9-A1,A10-A2,A11-A3,A12-A4) / M) = {recovery:.6g}")
+            return ppr, induction, recovery
         maxamp = amp.max(axis=1 if normalize_by_trial else None)
+        induction = np.mean(amp[:, 4] / amp[:, 0])
 
         def format_array(arr):
             """Format an array to 2 significant figures for cleaner output."""
@@ -537,7 +613,7 @@ class SynapseTuner:
             print(f"Short Term Plasticity Results for {self.train_freq}Hz with {self.train_delay} Delay")
             print("="*40)
             print("PPR: Above 1 is facilitating, below 1 is depressing.")
-            print("Induction: Above 0 is facilitating, below 0 is depressing.")
+            print("Induction (A5/A1): Above 1 is facilitating, below 1 is depressing.")
             print("Recovery: A measure of how fast STP decays.\n")
 
             # PPR Calculation
@@ -547,11 +623,10 @@ class SynapseTuner:
             print(f"Values: ({format_array(amp[:, 1:2])}) / ({format_array(amp[:, 0:1])}) = {format_array(ppr)}\n")
 
             # Induction Calculation
-            induction = np.mean((amp[:, 5:8].mean(axis=1) - amp[:, :1].mean(axis=1)) / maxamp)
             print("Induction")
-            print("Calculation: (avg(6th, 7th, 8th pulses) - 1st pulse) / max amps")
-            print(f"Values: avg({format_array(amp[:, 5:8])}) - {format_array(amp[:, :1])} / {format_array(maxamp)}")
-            print(f"({format_array(amp[:, 5:8].mean(axis=1))}) - ({format_array(amp[:, :1].mean(axis=1))}) / {format_array(maxamp)} = {induction:.3f}\n")
+            print("Calculation: (5th pulse / 1st pulse)")
+            print(f"Values: avg({format_array(amp[:, 4:5].mean(axis=1))}) / {format_array(amp[:, :1].mean(axis=1))} = {induction:.3f}\n")
+            print(f"({format_array(amp[:, 4:5].mean(axis=1))}) / ({format_array(amp[:, :1].mean(axis=1))}) = {induction:.3f}\n")
 
             # Recovery Calculation
             recovery = np.mean((amp[:, 8:12].mean(axis=1) - amp[:, :4].mean(axis=1)) / maxamp)
@@ -563,7 +638,6 @@ class SynapseTuner:
             print("="*40 + "\n")
 
         recovery = np.mean((amp[:, 8:12].mean(axis=1) - amp[:, :4].mean(axis=1)) / maxamp)
-        induction = np.mean((amp[:, 5:8].mean(axis=1) - amp[:, :1].mean(axis=1)) / maxamp)
         ppr = amp[:, 1:2] / amp[:, 0:1]
         # maxamp = max(amp, key=lambda x: abs(x[0]))
         maxamp = maxamp.max()
@@ -605,7 +679,7 @@ class SynapseTuner:
             vcldur = [[0, 0, 0], [self.general_settings['tstart'], self.tstop, 1e9]]
             for i in range(3):
                 self.vcl.amp[i] = self.conn['spec_settings']['vclamp_amp']
-                self.vcl.dur[i] = vcldur[1][i]
+                self.vcl.dur[i] = vcldur[1][i] if self.vclamp else 0.0
             h.finitialize(self.cell.Vinit * mV)
             h.continuerun(self.tstop * ms)
         else:
